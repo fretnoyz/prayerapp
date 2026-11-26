@@ -321,6 +321,7 @@ try {
   ok('offline reload renders the list from the cache');
   await page2.goto(BASE + '?add=' + encodeURIComponent('Prayed for while offline'));
   await page2.getByText('Added to prayer list').waitFor();
+  await page2.locator('.list li', { hasText: 'Prayed for while offline' }).waitFor();
   assert.equal(await page2.locator('.list li').count(), 3);
   assert.equal(new URL(page2.url()).search, '');
   ok('?add= works offline (served from cache, param still processed)');
