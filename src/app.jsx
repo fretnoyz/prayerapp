@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import * as db from './db.js';
-import { notify, toast, useData, useRoute, useToast, go } from './store.js';
+import { notify, toast, useData, useRoute, useToast, useUpdate, go } from './store.js';
+import { persistenceStatus } from './storage.js';
 
 // ---------- helpers ----------
 
@@ -14,7 +15,6 @@ function ago(iso) {
   const days = Math.round((db.startOfDay(db.now()) - db.startOfDay(new Date(iso).getTime())) / db.DAY);
   if (days <= 0) return 'today';
   if (days === 1) return 'yesterday';
-  if (days < 0) return '';
   return `${days} days ago`;
 }
 function until(iso) {
@@ -36,8 +36,11 @@ export function App() {
   const [page, id] = route;
   const [addOpen, setAddOpen] = useState(false);
   const addRef = useRef();
+  const addTrigger = useRef(null);
 
-  const openAdd = () => {
+  const openAdd = (e) => {
+    // Safari doesn't focus buttons on tap, so remember the + button itself to return focus to.
+    addTrigger.current = (e && e.currentTarget) || document.activeElement;
     setAddOpen(true);
     addRef.current && addRef.current.focus(); // synchronous focus so iOS raises the keyboard
   };
@@ -70,8 +73,9 @@ export function App() {
         <a href="#/archive" class={tab === 'archive' ? 'on' : ''}>Archive</a>
         <a href="#/settings" class={tab === 'settings' ? 'on' : ''}>Settings</a>
       </nav>
-      <QuickAdd open={addOpen} inputRef={addRef} onClose={() => setAddOpen(false)} />
+      <QuickAdd open={addOpen} inputRef={addRef} triggerRef={addTrigger} onClose={() => setAddOpen(false)} />
       <Toast />
+      <UpdateBar />
     </>
   );
 }
@@ -97,10 +101,72 @@ function Toast() {
   );
 }
 
+function UpdateBar() {
+  const u = useUpdate();
+  if (!u) return null;
+  return (
+    <div class="update no-print" role="status">
+      <span>{u.text} —</span>
+      <button class="link" onClick={u.run}>Reload</button>
+    </div>
+  );
+}
+
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]):not([type=hidden]):not([hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+// Safari doesn't focus buttons when tapped, so remember the last tapped control as a fallback trigger.
+let lastTapped = null;
+if (typeof document !== 'undefined') {
+  document.addEventListener('pointerdown', (e) => (lastTapped = e.target.closest && e.target.closest('button, a')), true);
+}
+
+// Sheet keyboard behaviour: Escape closes, Tab stays inside, focus returns to the trigger on close.
+function useSheetFocus(ref, active, onClose, triggerRef) {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    if (!active) return;
+    const focused = document.activeElement;
+    const trigger =
+      (triggerRef && triggerRef.current) || (focused && focused !== document.body ? focused : lastTapped);
+    const el = ref.current;
+    if (el && !el.contains(document.activeElement)) {
+      const first = el.querySelector(FOCUSABLE);
+      first && first.focus();
+    }
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeRef.current();
+      } else if (e.key === 'Tab' && el) {
+        const items = [...el.querySelectorAll(FOCUSABLE)].filter((n) => n.offsetParent !== null);
+        if (!items.length) return;
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (e.shiftKey && (document.activeElement === first || !el.contains(document.activeElement))) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && (document.activeElement === last || !el.contains(document.activeElement))) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      if (trigger && trigger !== document.body && trigger.isConnected && trigger.focus) trigger.focus();
+    };
+  }, [active]);
+}
+
 function Sheet({ title, onClose, children }) {
+  const ref = useRef();
+  useSheetFocus(ref, true, onClose);
   return (
     <div class="backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div class="sheet" role="dialog" aria-label={title}>
+      <div class="sheet" role="dialog" aria-modal="true" aria-label={title} ref={ref}>
         <h2>{title}</h2>
         {children}
       </div>
@@ -151,10 +217,11 @@ function ConfirmSheet({ title, body, okLabel, onOk, onClose, danger }) {
 
 // ---------- Quick Add (always mounted so focus() can raise the keyboard) ----------
 
-function QuickAdd({ open, inputRef, onClose }) {
+function QuickAdd({ open, inputRef, triggerRef, onClose }) {
   const [text, setText] = useState('');
   const [sectionId, setSectionId] = useState(null);
   const sections = useData(db.listSections) || [];
+  const formRef = useRef();
 
   const close = () => {
     setText('');
@@ -162,6 +229,7 @@ function QuickAdd({ open, inputRef, onClose }) {
     inputRef.current && inputRef.current.blur();
     onClose();
   };
+  useSheetFocus(formRef, open, close, triggerRef);
   const save = async (e) => {
     e && e.preventDefault();
     if (!text.trim()) return;
@@ -173,7 +241,7 @@ function QuickAdd({ open, inputRef, onClose }) {
 
   return (
     <div class={'backdrop quickadd' + (open ? ' open' : '')} aria-hidden={!open} onClick={(e) => e.target === e.currentTarget && close()}>
-      <form class="sheet" onSubmit={save}>
+      <form class="sheet" role="dialog" aria-modal="true" aria-label="New prayer request" onSubmit={save} ref={formRef}>
         <h2>New prayer request</h2>
         <input
           ref={inputRef}
@@ -206,17 +274,13 @@ function QuickAdd({ open, inputRef, onClose }) {
 // ---------- Today ----------
 
 async function loadToday() {
-  const [sections, active, stats, settings] = await Promise.all([
+  const [sections, active, prayedToday, settings] = await Promise.all([
     db.listSections(),
     db.listByStatus(['active']),
-    db.prayerStats(),
+    db.prayedTodayMap(),
     db.getSettings(),
   ]);
   active.sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
-  const prayedToday = {};
-  for (const p of await db.db.prayers.where('prayedAt').aboveOrEqual(new Date(db.startOfDay(db.now())).toISOString()).toArray()) {
-    if (!p.deletedAt) prayedToday[p.requestId] = p.id;
-  }
   const soonCutoff = new Date(db.now() + settings.alertLeadDays * db.DAY).toISOString();
   const expiring = active.filter((r) => r.expiresAt && r.expiresAt <= soonCutoff);
   const known = new Set(sections.map((s) => s.id));
@@ -227,7 +291,7 @@ async function loadToday() {
     const items = active.filter((r) => r.sectionId === s.id);
     if (items.length) groups.push({ id: s.id, name: s.name, items });
   }
-  return { groups, stats, prayedToday, expiring, total: active.length, settings };
+  return { groups, prayedToday, expiring, total: active.length, settings };
 }
 
 function Today() {
@@ -236,7 +300,7 @@ function Today() {
   const [noteFor, setNoteFor] = useState(null);
   const [answerFor, setAnswerFor] = useState(null);
   if (!data) return null;
-  const { groups, stats, prayedToday, expiring, total } = data;
+  const { groups, prayedToday, expiring, total } = data;
   const doneCount = Object.keys(prayedToday).filter((id) => groups.some((g) => g.items.some((r) => r.id === id))).length;
 
   const pray = async (r) => {
@@ -298,7 +362,6 @@ function Today() {
           <h3>{g.name}</h3>
           <ul class="list">
             {g.items.map((r) => {
-              const s = stats[r.id];
               const done = !!prayedToday[r.id];
               return (
                 <li key={r.id} class={done ? 'done' : ''}>
@@ -312,7 +375,7 @@ function Today() {
                   </button>
                   <a class="item" href={'#/request/' + r.id}>
                     <span class="text">{r.text}</span>
-                    <span class="meta no-print">{s ? `${s.count}× · ${ago(s.last)}` : 'not yet prayed'}</span>
+                    <span class="meta no-print">{r.prayCount ? `${r.prayCount}× · ${ago(r.lastPrayedAt)}` : 'not yet prayed'}</span>
                   </a>
                 </li>
               );
@@ -366,6 +429,14 @@ function Detail({ id }) {
   }
   const { req, prayers, notes } = data.bundle;
   const value = text ?? req.text;
+  const todayPrayer = prayers.find((p) => isToday(p.prayedAt));
+  const togglePrayed = run(async () => {
+    if (todayPrayer) await db.undoPrayer(todayPrayer.id);
+    else {
+      await db.logPrayer(id);
+      toast('Prayed');
+    }
+  });
   const saveText = run(async () => {
     if (value.trim() && value.trim() !== req.text) await db.updateRequest(id, { text: value.trim() });
     setText(null);
@@ -405,7 +476,14 @@ function Detail({ id }) {
       <div class="row-btns wrap">
         {req.status === 'active' ? (
           <>
-            <button class="ghost" onClick={run(async () => { await db.logPrayer(id); toast('Prayed'); })}>Prayed</button>
+            <button
+              class={todayPrayer ? 'primary' : 'ghost'}
+              aria-pressed={!!todayPrayer}
+              aria-label={todayPrayer ? 'Prayed today (tap to undo)' : undefined}
+              onClick={togglePrayed}
+            >
+              {todayPrayer ? '✓ Prayed today' : 'Mark prayed'}
+            </button>
             <button class="ghost" onClick={run(async () => { await db.extendRequest(id); toast('Extended'); })}>Extend</button>
             <button class="primary" onClick={() => setSheet('answer')}>Mark answered</button>
           </>
@@ -478,7 +556,7 @@ function Archive() {
     const items = await db.listByStatus(['answered', 'expired']);
     const key = (r) => r.answeredAt || r.expiresAt || r.updatedAt;
     items.sort((a, b) => (key(a) < key(b) ? 1 : -1));
-    return { items, stats: await db.prayerStats() };
+    return { items };
   });
   if (!data) return null;
   const items = data.items.filter((r) => filter === 'all' || r.status === filter);
@@ -500,7 +578,6 @@ function Archive() {
       {items.length === 0 && <p class="empty meta">Nothing here yet.</p>}
       <ul class="list archive-list">
         {items.map((r) => {
-          const s = data.stats[r.id];
           return (
             <li key={r.id}>
               <a class="item" href={'#/request/' + r.id}>
@@ -508,7 +585,7 @@ function Archive() {
                 {r.answerNote && <span class="answer-inline">{r.answerNote}</span>}
                 <span class="meta">
                   {r.status === 'answered' ? `Answered ${fmtDate(r.answeredAt)}` : `Expired ${fmtDate(r.expiresAt)}`}
-                  {s ? ` · prayed ${s.count}×` : ''}
+                  {r.prayCount ? ` · prayed ${r.prayCount}×` : ''}
                 </span>
               </a>
             </li>
@@ -521,13 +598,57 @@ function Archive() {
 
 // ---------- Settings ----------
 
+// An input that keeps what you type while you edit (background refreshes don't overwrite it)
+// and saves on blur or Enter. onSave(value) returns false to reject and restore the saved value.
+function EditField({ value, onSave, ...props }) {
+  const [draft, setDraft] = useState(null);
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focused.current) setDraft(null);
+  }, [value]);
+  const commit = async () => {
+    focused.current = false;
+    if (draft === null || draft === String(value)) return setDraft(null);
+    const ok = await onSave(draft);
+    if (ok === false) setDraft(null);
+    else notify();
+  };
+  return (
+    <input
+      {...props}
+      value={draft ?? value}
+      onFocus={() => (focused.current = true)}
+      onInput={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
+
+async function loadSettings() {
+  const [sections, settings, storage, undo] = await Promise.all([
+    db.listSections(),
+    db.getSettings(),
+    persistenceStatus(),
+    db.importUndoInfo(),
+  ]);
+  return { sections, settings, storage, undo };
+}
+
+const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
+
 function Settings() {
-  const data = useData(async () => ({ sections: await db.listSections(), settings: await db.getSettings() }));
+  const data = useData(loadSettings);
   const [newName, setNewName] = useState('');
   const [sheet, setSheet] = useState(null);
   const fileRef = useRef();
   if (!data) return null;
-  const { sections, settings } = data;
+  const { sections, settings, storage, undo } = data;
 
   const doExport = async () => {
     const payload = await db.exportData();
@@ -548,15 +669,24 @@ function Settings() {
     e.target.value = '';
     if (!f) return;
     try {
-      const parsed = JSON.parse(await f.text());
-      if (parsed.app !== 'prayerapp') throw new Error();
-      setSheet({ kind: 'import', data: parsed });
-    } catch {
-      toast('That file is not a Prayer List backup.');
+      const parsed = await readBackupFile(f);
+      setSheet({ kind: 'import', data: parsed, counts: db.validateBackup(parsed) });
+    } catch (err) {
+      toast(`${err.message} Nothing was changed.`, null, 6000);
     }
   };
 
+  const doUndoImport = async () => {
+    if (await db.undoImport()) toast('Import undone. Your earlier list is back.');
+    notify();
+  };
+
   const stale = !settings.lastExportedAt || db.now() - new Date(settings.lastExportedAt).getTime() > 30 * db.DAY;
+  const saveNumber = (key, min) => async (v) => {
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n) || n < min || String(v).trim() === '') return false;
+    await db.saveSettings({ [key]: n });
+  };
 
   return (
     <section class="settings">
@@ -568,11 +698,15 @@ function Settings() {
       <ul class="sections">
         {sections.map((s, i) => (
           <li key={s.id}>
-            <input
+            <EditField
               class="sec-name"
               aria-label="Section name"
+              enterkeyhint="done"
               value={s.name}
-              onBlur={run((e) => e.target.value.trim() && e.target.value.trim() !== s.name && db.updateSection(s.id, { name: e.target.value.trim() }))}
+              onSave={async (v) => {
+                if (!v.trim()) return false;
+                await db.updateSection(s.id, { name: v.trim() });
+              }}
             />
             <label class="never">
               <input type="checkbox" checked={s.neverExpires} onChange={run((e) => db.updateSection(s.id, { neverExpires: e.target.checked }))} />
@@ -601,25 +735,27 @@ function Settings() {
       <h3>Expiry</h3>
       <label class="field inline">
         Requests expire after
-        <input
+        <EditField
           type="number"
           min="1"
           inputMode="numeric"
+          enterkeyhint="done"
           aria-label="Default expiry days"
           value={settings.defaultExpiryDays}
-          onChange={run((e) => +e.target.value > 0 && db.saveSettings({ defaultExpiryDays: Math.round(+e.target.value) }))}
+          onSave={saveNumber('defaultExpiryDays', 1)}
         />
         days
       </label>
       <label class="field inline">
         Remind me
-        <input
+        <EditField
           type="number"
           min="0"
           inputMode="numeric"
+          enterkeyhint="done"
           aria-label="Alert lead days"
           value={settings.alertLeadDays}
-          onChange={run((e) => +e.target.value >= 0 && db.saveSettings({ alertLeadDays: Math.round(+e.target.value) }))}
+          onSave={saveNumber('alertLeadDays', 0)}
         />
         days before
       </label>
@@ -635,6 +771,22 @@ function Settings() {
         <button class="ghost" onClick={() => fileRef.current.click()}>Import backup</button>
         <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={onFile} />
       </div>
+      {undo && (
+        <p class="meta undo-import">
+          Imported a backup on {fmtDateTime(undo.takenAt)}.{' '}
+          <button class="link" onClick={() => setSheet({ kind: 'undo', undo })}>Undo import</button>
+        </p>
+      )}
+
+      <h3>Storage</h3>
+      <p class="meta storage">
+        Storage: <strong>{storage}</strong>.{' '}
+        {storage === 'protected'
+          ? 'The browser has agreed not to clear this list to free up space.'
+          : storage === 'not protected'
+            ? 'The browser may clear this list if the phone runs low on space or the site goes unused for a while. Keep a recent backup.'
+            : 'This browser does not say whether it may clear this list. Keep a recent backup.'}
+      </p>
 
       <p class="meta about">
         iPhone: keep using this page in Safari (bookmark it). A Home Screen copy keeps separate data from Safari and the Siri Shortcut.
@@ -653,16 +805,88 @@ function Settings() {
       {sheet?.kind === 'import' && (
         <ConfirmSheet
           title="Replace everything with this backup?"
-          body={`Backup from ${fmtDate(sheet.data.exportedAt)} with ${sheet.data.requests.filter((r) => !r.deletedAt).length} requests. Everything currently on this phone will be replaced.`}
+          body={importSummary(sheet.counts)}
           okLabel="Replace"
           danger
           onOk={run(async () => {
             await db.importData(sheet.data);
-            toast('Backup restored');
+            toast('Backup restored', { label: 'Undo', run: doUndoImport }, 8000);
           })}
           onClose={() => setSheet(null)}
         />
       )}
+      {sheet?.kind === 'undo' && (
+        <ConfirmSheet
+          title="Undo the import?"
+          body={`Your list goes back to how it was just before the import on ${fmtDateTime(sheet.undo.takenAt)}. Anything added since then will be removed.`}
+          okLabel="Undo import"
+          danger
+          onOk={doUndoImport}
+          onClose={() => setSheet(null)}
+        />
+      )}
     </section>
+  );
+}
+
+async function readBackupFile(f) {
+  let parsed;
+  try {
+    parsed = JSON.parse(await f.text());
+  } catch {
+    throw new Error('This file is not a Prayer List backup.');
+  }
+  db.validateBackup(parsed);
+  return parsed;
+}
+
+function importSummary(c) {
+  const from = c.exportedAt ? `Backup from ${fmtDate(c.exportedAt)}` : 'This backup';
+  return (
+    `${from} has ${plural(c.requests, 'request')} (${c.active} on the list, ${c.answered} answered), ` +
+    `${plural(c.prayers, 'prayer')} logged, ${plural(c.notes, 'note')} and ${plural(c.sections, 'section')}. ` +
+    'Everything currently on this phone will be replaced. You can undo this afterward.'
+  );
+}
+
+// ---------- startup failure ----------
+
+export function BootError({ error }) {
+  const fileRef = useRef();
+  const [msg, setMsg] = useState(null);
+  const onFile = async (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    try {
+      const parsed = await readBackupFile(f);
+      await db.importData(parsed);
+      location.reload();
+    } catch (err) {
+      setMsg(err.message || 'The backup could not be restored.');
+    }
+  };
+  return (
+    <main class="boot-error">
+      <h1>Prayer List</h1>
+      <p>
+        <strong>Your prayer list couldn’t be opened.</strong>
+      </p>
+      <p>
+        This browser’s storage didn’t open, so your requests may not be available right now. They are usually still
+        there: try again in a moment.
+      </p>
+      <p class="meta">
+        If this keeps happening (for example in Private Browsing, or after the browser cleared website data), you can
+        restore from a backup file.
+      </p>
+      <div class="row-btns wrap">
+        <button class="primary" onClick={() => location.reload()}>Try again</button>
+        <button class="ghost" onClick={() => fileRef.current.click()}>Import backup</button>
+        <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={onFile} />
+      </div>
+      {msg && <p class="warn" role="alert">{msg}</p>}
+      {error && <p class="meta error-detail">Details: {String(error.message || error)}</p>}
+    </main>
   );
 }

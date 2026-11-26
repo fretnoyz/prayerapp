@@ -132,6 +132,15 @@ textarea { resize: vertical; }
 .toast .link { color: var(--bg); font-weight: 600; padding: 12px 8px; }
 @keyframes fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
 
+/* update notice: quiet, top of screen, never blocks */
+.update {
+  position: fixed; top: calc(env(safe-area-inset-top) + 8px); right: 12px;
+  display: flex; align-items: center; gap: 8px; z-index: 15;
+  background: var(--card); color: var(--muted); border: 1px solid var(--line);
+  border-radius: 18px; padding: 0 6px 0 14px; font-size: 14px; box-shadow: 0 2px 10px rgba(0,0,0,.12);
+}
+.update .link { color: var(--ink); font-weight: 600; padding: 8px; }
+
 /* sheets */
 .backdrop {
   position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 20;
@@ -175,6 +184,13 @@ textarea { resize: vertical; }
 .never input { width: 22px; height: 22px; min-height: 0; }
 .add-sec { display: flex; gap: 8px; margin-top: 12px; }
 .about { margin-top: 32px; }
+.undo-import { margin-top: 10px; }
+.storage strong { color: var(--ink); font-weight: 600; }
+
+/* startup failure */
+.boot-error h1 { margin-bottom: 16px; }
+.boot-error p { margin-bottom: 12px; }
+.error-detail { margin-top: 24px; word-break: break-word; }
 .print-link { text-align: center; margin-top: 24px; }
 
 /* print */
