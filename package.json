@@ -1,0 +1,32 @@
+{
+  "name": "prayerapp",
+  "version": "1.0.0",
+  "description": "Quick Prayer App",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node tests/e2e.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fretnoyz/prayerapp.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/fretnoyz/prayerapp/issues"
+  },
+  "homepage": "https://github.com/fretnoyz/prayerapp#readme",
+  "dependencies": {
+    "dexie": "^4.4.7",
+    "preact": "^11.2.0"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.6",
+    "playwright": "^1.63.0",
+    "vite": "^8.3.8"
+  },
+  "private": true,
+  "type": "module"
+}
