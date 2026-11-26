@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f7f5ef">
+    <title>Quietly — Prayer Journal</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="Quietly home">
+          <span class="brand-mark" aria-hidden="true">✳</span>
+          <span>quietly</span>
+        </a>
+        <span class="private-note"><span aria-hidden="true">●</span> Just for you</span>
+      </header>
+
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">A LITTLE SPACE FOR WHAT'S ON YOUR HEART</p>
+        <h1 id="page-title">Make room for <em>prayer.</em></h1>
+        <p class="intro-copy">A quiet place to leave your prayers, remember them, and celebrate the answers.</p>
+      </section>
+
+      <section class="write-card" aria-labelledby="new-prayer-heading">
+        <div class="card-heading">
+          <span class="heading-icon" aria-hidden="true">♡</span>
+          <div>
+            <h2 id="new-prayer-heading">What’s on your heart?</h2>
+            <p>You can keep it simple. This is just for you.</p>
+          </div>
+        </div>
+        <form id="prayer-form">
+          <label class="sr-only" for="prayer-input">Write a prayer or intention</label>
+          <textarea id="prayer-input" name="prayer" rows="3" maxlength="500" placeholder="Write a prayer or intention…" required></textarea>
+          <div class="form-footer">
+            <span id="char-count" aria-live="polite">0 / 500</span>
+            <button class="primary-button" type="submit"><span aria-hidden="true">＋</span> Add to my prayers</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="prayers" aria-labelledby="prayers-heading">
+        <div class="list-heading">
+          <div>
+            <p class="eyebrow">YOUR PRIVATE JOURNAL</p>
+            <h2 id="prayers-heading">My prayers <span id="prayer-count" class="count">0</span></h2>
+          </div>
+          <label class="sr-only" for="prayer-filter">Filter prayers</label>
+          <select id="prayer-filter">
+            <option value="all">All prayers</option>
+            <option value="active">In prayer</option>
+            <option value="answered">Answered</option>
+          </select>
+        </div>
+        <div id="prayer-list" class="prayer-list" aria-live="polite"></div>
+      </section>
+
+      <footer>“Be still, and know.” <span>— Psalm 46:10</span></footer>
+    </main>
+  </body>
+</html>
