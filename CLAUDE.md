@@ -69,6 +69,13 @@ Sections on first run: Family, Church, Friends, Missions, Work. (User will renam
 - Shared list for husband and wife (backend TBD: managed vs self-hosted), with author on notes and "prayed together" marking.
 - Computer entry, offline capture with sync, push notifications, one-breath native Siri, native app if PWA limits bite.
 
+### Sync notes (groundwork only; sync is not built)
+- Every record already has a UUID `id`, `createdAt`, `updatedAt`, soft-delete `deletedAt`, and a `deviceId` (from the `settings` row with id `device`, created once per device and never exported). That is enough to merge per record, last-writer-wins, without a server-side id scheme.
+- Plain wall-clock `updatedAt` is fragile across devices (phone clocks drift, and the test clock exists). When sync is built, add a hybrid logical clock: store `hlc` = (max(wall ms, last seen hlc ms), counter, deviceId) on each write and compare by that instead of `updatedAt`; ties break on `deviceId`. Advance the local HLC whenever remote records are received.
+- `prayers` and `notes` are append-only logs (only ever soft-deleted), so they merge as a union with no conflicts. `requests.prayCount` / `lastPrayedAt` are a derived cache of the prayers log: recompute after merging, never sync them as authoritative (they deliberately don't bump `updatedAt`).
+- Settings split: `defaultExpiryDays`, `alertLeadDays` and sections (names, order, never-expires) are list-level and should be shared between husband and wife. `lastExportedAt`, `deviceId`, storage-persistence state and any display preferences are per device/person and must not sync. Today `deviceId` already has its own `settings` row (id `device`); `lastExportedAt` still sits in the shared `settings` row and should move out before sharing.
+- Shared list will need `author` on requests/notes (fields reserved, null today) and a person id separate from `deviceId` (one person may have several devices).
+
 ## Definition of done
 - Builds and deploys to GitHub Pages via Actions.
 - Tested in a mobile viewport: add, `?add=` capture (no duplicate on refresh), mark prayed + note, extend, answer, expiry sweep (fake the clock), archive, section reorder, export → wipe → import round-trip.
