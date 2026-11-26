@@ -7,8 +7,35 @@
   "background_color": "#f7f5f0",
   "theme_color": "#3b4a3f",
   "icons": [
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" },
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "description": "A simple prayer request list.",
+  "shortcuts": [
+    {
+      "name": "New request",
+      "short_name": "New",
+      "url": "./#/add",
+      "icons": [
+        {
+          "src": "icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
   ]
 }
